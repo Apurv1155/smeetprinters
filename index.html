@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NextGen QuickBills - Smeet Printers</title>
+    
+    <!-- Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- Configuration -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              teal: { 500: '#00c7a4', 600: '#00b090' },
+              dark: '#2d2d38'
+            },
+            fontFamily: { sans: ['Inter', 'sans-serif'] }
+          }
+        }
+      }
+    </script>
+
+    <!-- Styles -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up { animation: fadeInUp 0.3s ease-out forwards; }
+
+        /* Print Logic - Robust Fix */
+        @media print {
+            /* Reset Page */
+            @page { margin: 0; size: auto; }
+            html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+                height: auto !important;
+                overflow: visible !important;
+                background: white !important;
+            }
+
+            /* Hide App UI */
+            #app, #loading-screen {
+                display: none !important;
+            }
+
+            /* Show Template */
+            #pdf-template-container {
+                display: block !important;
+                position: relative !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+
+            #pdf-template {
+                width: 100% !important;
+                margin: 0 !important;
+                box-shadow: none !important;
+                border: none !important;
+                /* Force black text for printers */
+                color: black !important;
+            }
+        }
+    </style>
+</head>
+<body class="text-dark antialiased overflow-x-hidden">
+
+    <!-- LOADING SCREEN -->
+    <div id="loading-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-white transition-opacity duration-500">
+        <div class="text-center animate-pulse">
+            <div class="w-24 h-24 mx-auto mb-4 bg-teal-500 rounded-2xl flex items-center justify-center shadow-lg transform rotate-3">
+                <i class="fas fa-print text-4xl text-white"></i>
+            </div>
+            <h1 class="text-3xl font-bold text-dark tracking-tight">
+                NextGen <span class="text-teal-500">QuickBills</span>
+            </h1>
+            <p class="text-gray-400 mt-2 text-sm font-medium">Smeet Printers</p>
+        </div>
+    </div>
+
+    <!-- MAIN APP CONTAINER -->
+    <div id="app" class="hidden min-h-screen flex flex-col relative">
+
+        <!-- VIEW: DASHBOARD -->
+        <div id="view-dashboard" class="flex-col h-full absolute inset-0 bg-slate-50 overflow-y-auto">
+            <header class="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-gray-200 px-6 py-4 shadow-sm">
+                <div class="flex justify-between items-center max-w-5xl mx-auto">
+                    <div>
+                        <h1 class="text-xl font-bold text-dark">Smeet Printers Dashboard</h1>
+                        <p class="text-xs text-gray-500">Powered by NextGen</p>
+                    </div>
+                    <button onclick="router.navigate('create')" class="bg-teal-500 hover:bg-teal-600 text-white p-3 rounded-full shadow-lg shadow-teal-500/30 transition-transform active:scale-95 flex items-center justify-center w-12 h-12">
+                        <i class="fas fa-plus text-lg"></i>
+                    </button>
+                </div>
+            </header>
+
+            <div class="px-6 py-4 max-w-5xl mx-auto w-full">
+                <div class="relative">
+                    <i class="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                    <input type="text" id="search-input" placeholder="Search name, phone, or date..." 
+                        class="w-full pl-11 pr-4 py-3 bg-white rounded-xl border-none shadow-sm focus:ring-2 focus:ring-teal-500 text-gray-700 outline-none">
+                </div>
+            </div>
+
+            <div id="bills-list" class="flex-1 px-6 pb-20 max-w-5xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Bills will be injected here -->
+            </div>
+            
+            <div id="dashboard-loading" class="hidden flex flex-col items-center justify-center py-20 text-gray-400">
+                <i class="fas fa-spinner fa-spin text-3xl mb-4 text-teal-500"></i>
+                <p>Loading records...</p>
+            </div>
+            
+             <div id="dashboard-empty" class="hidden text-center py-20 text-gray-400 w-full col-span-full">
+                <i class="fas fa-folder-open text-4xl mb-4 opacity-50"></i>
+                <p>No bills found.</p>
+            </div>
+        </div>
+
+        <!-- VIEW: CREATE BILL -->
+        <div id="view-create" class="hidden flex-col h-full absolute inset-0 bg-slate-50 overflow-y-auto">
+            <div class="bg-white sticky top-0 z-10 px-6 py-4 border-b border-gray-200 flex justify-between items-center shadow-sm">
+                <button onclick="router.navigate('dashboard')" class="text-gray-500 hover:text-dark">
+                    <i class="fas fa-arrow-left text-xl"></i>
+                </button>
+                <h2 class="text-lg font-bold text-dark">New Bill Entry</h2>
+                <div class="w-6"></div>
+            </div>
+
+            <form id="create-form" class="flex-1 p-6 max-w-3xl mx-auto w-full pb-32">
+                <div class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+                    <h3 class="text-sm uppercase tracking-wide text-gray-400 font-bold mb-4">Customer Details</h3>
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                            <input type="date" id="input-date" required class="w-full p-3 bg-gray-50 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-teal-500 transition-colors">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
+                            <input type="text" id="input-name" required placeholder="John Doe" class="w-full p-3 bg-gray-50 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-teal-500 transition-colors">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                            <input type="tel" id="input-phone" required placeholder="9876543210" class="w-full p-3 bg-gray-50 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-teal-500 transition-colors">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                            <input type="text" id="input-address" placeholder="City, Street" class="w-full p-3 bg-gray-50 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-teal-500 transition-colors">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-sm p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-sm uppercase tracking-wide text-gray-400 font-bold">Items</h3>
+                        <button type="button" onclick="formHandler.addItem()" class="text-teal-500 text-sm font-bold hover:text-teal-600">+ Add Item</button>
+                    </div>
+                    <div id="items-container" class="space-y-3">
+                        <!-- Items injected here -->
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-gray-100 flex justify-between items-center">
+                        <span class="font-bold text-gray-600">Total Amount</span>
+                        <span id="create-total" class="text-2xl font-bold text-teal-600">₹0.00</span>
+                    </div>
+                </div>
+                
+                <div class="fixed bottom-6 left-0 right-0 px-6 max-w-3xl mx-auto z-20">
+                    <button type="submit" id="btn-save" class="w-full py-4 rounded-xl shadow-lg shadow-teal-500/40 text-white font-bold text-lg bg-teal-500 hover:bg-teal-600 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fas fa-save"></i> Save Bill
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- VIEW: DETAIL (Redesigned for Mobile) -->
+        <div id="view-detail" class="hidden flex-col h-full absolute inset-0 bg-white overflow-hidden">
+             
+            <!-- Header -->
+            <div class="bg-white px-6 py-4 border-b border-gray-100 flex items-center gap-4 z-20">
+                <button onclick="router.navigate('dashboard')" class="text-gray-500 hover:text-dark w-8 h-8 flex items-center justify-center -ml-2 rounded-full active:bg-gray-100">
+                    <i class="fas fa-arrow-left text-lg"></i>
+                </button>
+                <h1 class="text-lg font-bold text-dark flex-1">Bill Details</h1>
+            </div>
+
+            <!-- Scrollable Content -->
+            <div class="flex-1 overflow-y-auto pb-32">
+                <!-- Customer Card -->
+                <div class="p-6 bg-slate-50 border-b border-gray-100">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h2 id="detail-name" class="text-2xl font-bold text-dark leading-tight">Customer Name</h2>
+                            <p id="detail-id" class="text-xs font-mono text-gray-400 mt-1 bg-white px-2 py-0.5 rounded border border-gray-200 inline-block">#INV-000</p>
+                        </div>
+                        <div class="text-right">
+                             <div class="inline-flex flex-col items-end">
+                                <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Date</span>
+                                <span id="detail-date" class="text-sm font-medium text-dark">01/01/2024</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-teal-500 shadow-sm shrink-0">
+                                <i class="fas fa-phone-alt text-xs"></i>
+                            </div>
+                            <span id="detail-phone" class="font-medium">9876543210</span>
+                        </div>
+                        <div id="detail-address-row" class="flex items-center gap-3">
+                             <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-teal-500 shadow-sm shrink-0">
+                                <i class="fas fa-map-marker-alt text-xs"></i>
+                            </div>
+                            <span id="detail-address" class="font-medium">Address Line</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Items List -->
+                <div class="p-6">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Purchased Items</h3>
+                    <div id="detail-items" class="space-y-0 divide-y divide-gray-50">
+                        <!-- Items injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sticky Footer Actions -->
+            <div class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 pb-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
+                <div class="flex justify-between items-center mb-4 px-2">
+                    <span class="text-gray-500 font-medium">Grand Total</span>
+                    <span id="detail-total" class="text-3xl font-bold text-teal-600">₹0.00</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="outputHandler.print()" class="bg-dark text-white py-3.5 rounded-xl font-bold text-sm shadow-lg hover:bg-gray-800 transition-all active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fas fa-print"></i> Print Bill
+                    </button>
+                    <button onclick="outputHandler.download()" id="btn-download-pdf" class="bg-teal-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-lg shadow-teal-500/30 hover:bg-teal-600 transition-all active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fas fa-file-download"></i> Save PDF
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- TEMPLATE: PDF & PRINT (Hidden normally, shown in print media or cloned for PDF) -->
+    <div id="pdf-template-container" class="hidden">
+        <div id="pdf-template" style="width: 794px; min-height: 1123px; background-color: white; padding: 40px; font-family: 'Inter', sans-serif; color: #2d2d38; position: relative; box-sizing: border-box; margin: 0 auto;">
+            
+            <!-- PDF Header -->
+            <div style="display: flex; justify-content: space-between; margin-bottom: 30px; border-bottom: 2px solid #00c7a4; padding-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <div style="width: 50px; height: 50px; background-color: #00c7a4; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px;">
+                        <i class="fas fa-print"></i>
+                    </div>
+                    <div>
+                        <h1 style="font-size: 28px; font-weight: 800; margin: 0; text-transform: uppercase; letter-spacing: -0.5px;">Smeet Printers</h1>
+                        <p style="margin: 4px 0 0 0; color: #00c7a4; font-weight: 600; font-size: 14px;">High Quality Printing Services</p>
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 36px; font-weight: 900; color: #e2e8f0; text-transform: uppercase; line-height: 1;">Invoice</div>
+                    <div id="pdf-bill-id" style="margin-top: 10px; font-size: 14px; font-weight: bold; color: #475569;">#INV-000000</div>
+                    <div id="pdf-bill-date" style="font-size: 14px; color: #64748b;">01/01/2025</div>
+                </div>
+            </div>
+
+            <!-- Info Columns -->
+            <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
+                <div style="width: 45%;">
+                    <h3 style="font-size: 12px; font-weight: bold; text-transform: uppercase; color: #94a3b8; margin-bottom: 8px;">From</h3>
+                    <p style="margin: 0; font-weight: bold; font-size: 14px;">Smeet Printers</p>
+                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #64748b; line-height: 1.5;">
+                        123, Industrial Area<br>
+                        City Center, 450001<br>
+                        +91 98765 43210
+                    </p>
+                </div>
+                <div style="width: 45%;">
+                    <h3 style="font-size: 12px; font-weight: bold; text-transform: uppercase; color: #94a3b8; margin-bottom: 8px;">Bill To</h3>
+                    <p id="pdf-customer-name" style="margin: 0; font-weight: bold; font-size: 16px; color: #0f172a;">Customer Name</p>
+                    <p id="pdf-customer-phone" style="margin: 4px 0 0 0; font-size: 13px; color: #64748b;">9999999999</p>
+                    <p id="pdf-customer-address" style="margin: 2px 0 0 0; font-size: 13px; color: #64748b;">Address Line</p>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div style="margin-bottom: 40px;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background-color: #00c7a4; color: white;">
+                            <th style="padding: 12px 15px; text-align: left; font-size: 12px; text-transform: uppercase; width: 50px;">#</th>
+                            <th style="padding: 12px 15px; text-align: left; font-size: 12px; text-transform: uppercase;">Item Description</th>
+                            <th style="padding: 12px 15px; text-align: right; font-size: 12px; text-transform: uppercase; width: 120px;">Price (₹)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pdf-items-body">
+                        <!-- Rows injected via JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Totals -->
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 60px;">
+                <div style="width: 250px;">
+                    <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #e2e8f0;">
+                        <span style="font-size: 14px; color: #64748b;">Subtotal</span>
+                        <span id="pdf-subtotal" style="font-size: 14px; font-weight: bold;">₹0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 15px 0; border-bottom: 2px solid #00c7a4;">
+                        <span style="font-size: 18px; font-weight: bold; color: #00c7a4;">Total</span>
+                        <span id="pdf-total" style="font-size: 24px; font-weight: bold; color: #00c7a4;">₹0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="margin-top: auto; padding-top: 40px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px;">
+                    <div style="font-size: 10px; color: #94a3b8; max-width: 300px;">
+                        <strong style="display: block; margin-bottom: 5px; text-transform: uppercase;">Terms & Conditions</strong>
+                        Payment is due upon receipt. Please make checks payable to Smeet Printers.
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="width: 150px; border-bottom: 1px solid #cbd5e1; margin-bottom: 5px;"></div>
+                        <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; color: #64748b;">Authorized Signatory</div>
+                    </div>
+                </div>
+                <div style="border-top: 1px solid #f1f5f9; padding-top: 15px; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 10px; color: #00c7a4; font-weight: bold;">Smeet Printers</span>
+                    <span style="font-size: 10px; color: #cbd5e1;">Generated by NextGen QuickBills</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        const API_URL = 'https://script.google.com/macros/s/AKfycbwU92x1SYftWOrjYaLm_nEeI1sIYHo1p1Ypzi0hV8IHSkknuJ86tpSGqijm9J43o4VF/exec';
+
+        // --- State ---
+        const state = {
+            bills: [],
+            loading: false,
+            currentBill: null,
+            cartItems: [{ name: '', price: 0 }]
+        };
+
+        // --- DOM Elements ---
+        const views = {
+            loading: document.getElementById('loading-screen'),
+            app: document.getElementById('app'),
+            dashboard: document.getElementById('view-dashboard'),
+            create: document.getElementById('view-create'),
+            detail: document.getElementById('view-detail')
+        };
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // 1. Show intro animation
+            setTimeout(() => {
+                views.loading.style.opacity = '0';
+                setTimeout(() => {
+                    views.loading.style.display = 'none';
+                    views.app.classList.remove('hidden');
+                    router.navigate('dashboard');
+                }, 500);
+            }, 2000);
+
+            // 2. Set default date
+            document.getElementById('input-date').valueAsDate = new Date();
+
+            // 3. Attach Event Listeners
+            document.getElementById('search-input').addEventListener('input', (e) => dashboard.filter(e.target.value));
+            document.getElementById('create-form').addEventListener('submit', formHandler.submit);
+            
+            // 4. Load Data
+            api.fetchBills();
+        });
+
+        // --- Router ---
+        const router = {
+            navigate: (viewName) => {
+                views.dashboard.classList.add('hidden');
+                views.create.classList.add('hidden');
+                views.detail.classList.add('hidden');
+
+                if (viewName === 'dashboard') {
+                    views.dashboard.classList.remove('hidden');
+                    dashboard.render(state.bills);
+                } else if (viewName === 'create') {
+                    views.create.classList.remove('hidden');
+                    formHandler.reset();
+                } else if (viewName === 'detail') {
+                    views.detail.classList.remove('hidden');
+                }
+            }
+        };
+
+        // --- API Service ---
+        const api = {
+            fetchBills: async () => {
+                const loader = document.getElementById('dashboard-loading');
+                const empty = document.getElementById('dashboard-empty');
+                
+                loader.classList.remove('hidden');
+                empty.classList.add('hidden');
+                
+                try {
+                    const response = await fetch(API_URL);
+                    const result = await response.json();
+                    
+                    if (result.status === 'success') {
+                        // FIX: Sort descending by date (Newest First) instead of relying on default order + reverse
+                        state.bills = result.data.sort((a, b) => new Date(b.date) - new Date(a.date));
+                        dashboard.render(state.bills);
+                    }
+                } catch (error) {
+                    console.error('Fetch error:', error);
+                    alert('Could not load bills. Check connection.');
+                } finally {
+                    loader.classList.add('hidden');
+                }
+            },
+
+            saveBill: async (billData) => {
+                try {
+                    await fetch(API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'saveBill', ...billData })
+                    });
+                    // Optimistic update: unshift adds to the beginning (Top)
+                    state.bills.unshift(billData);
+                    return true;
+                } catch (error) {
+                    console.error('Save error:', error);
+                    return false;
+                }
+            }
+        };
+
+        // --- Dashboard Logic ---
+        const dashboard = {
+            render: (bills) => {
+                const container = document.getElementById('bills-list');
+                const empty = document.getElementById('dashboard-empty');
+                container.innerHTML = '';
+
+                if (!bills || bills.length === 0) {
+                    empty.classList.remove('hidden');
+                    return;
+                }
+                empty.classList.add('hidden');
+
+                bills.forEach(bill => {
+                    const dateStr = new Date(bill.date).toLocaleDateString();
+                    const total = parseFloat(bill.total).toFixed(2);
+                    
+                    const card = document.createElement('div');
+                    card.className = 'bg-white p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-transparent hover:border-teal-100 group animate-fade-in-up';
+                    card.onclick = () => detailHandler.show(bill);
+                    
+                    card.innerHTML = `
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <h3 class="font-bold text-dark text-lg group-hover:text-teal-600 transition-colors">${bill.customerName}</h3>
+                                <p class="text-xs text-gray-500 font-medium bg-gray-100 inline-block px-2 py-1 rounded-md mt-1">${bill.billId}</p>
+                            </div>
+                            <span class="text-xs font-semibold text-gray-400">${dateStr}</span>
+                        </div>
+                        <div class="flex justify-between items-end border-t border-gray-50 pt-3 mt-2">
+                            <div class="text-xs text-gray-500">
+                                <p><i class="fas fa-phone-alt mr-1 text-teal-500 opacity-60"></i> ${bill.phone}</p>
+                                <p class="mt-1"><i class="fas fa-layer-group mr-1 text-teal-500 opacity-60"></i> ${bill.items.length} items</p>
+                            </div>
+                            <span class="text-lg font-bold text-dark">₹${total}</span>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            },
+
+            filter: (term) => {
+                const lowerTerm = term.toLowerCase();
+                const filtered = state.bills.filter(bill => {
+                    const name = String(bill.customerName || '').toLowerCase();
+                    const phone = String(bill.phone || '');
+                    const date = String(bill.date || '');
+                    const id = String(bill.billId || '').toLowerCase();
+                    return name.includes(lowerTerm) || phone.includes(lowerTerm) || date.includes(lowerTerm) || id.includes(lowerTerm);
+                });
+                dashboard.render(filtered);
+            }
+        };
+
+        // --- Form Logic ---
+        const formHandler = {
+            reset: () => {
+                state.cartItems = [{ name: '', price: 0 }];
+                document.getElementById('input-name').value = '';
+                document.getElementById('input-phone').value = '';
+                document.getElementById('input-address').value = '';
+                document.getElementById('input-date').valueAsDate = new Date();
+                formHandler.renderItems();
+            },
+
+            addItem: () => {
+                state.cartItems.push({ name: '', price: 0 });
+                formHandler.renderItems();
+            },
+
+            removeItem: (index) => {
+                if (state.cartItems.length > 1) {
+                    state.cartItems.splice(index, 1);
+                    formHandler.renderItems();
+                }
+            },
+
+            updateItem: (index, field, value) => {
+                if (field === 'price') {
+                    state.cartItems[index][field] = parseFloat(value) || 0;
+                } else {
+                    state.cartItems[index][field] = value;
+                }
+                formHandler.updateTotal();
+            },
+
+            renderItems: () => {
+                const container = document.getElementById('items-container');
+                container.innerHTML = '';
+
+                state.cartItems.forEach((item, index) => {
+                    const div = document.createElement('div');
+                    div.className = 'flex gap-2 items-start animate-fade-in-up';
+                    div.innerHTML = `
+                        <div class="flex-1">
+                            <input type="text" placeholder="Item name" required value="${item.name}" 
+                                oninput="formHandler.updateItem(${index}, 'name', this.value)"
+                                class="w-full p-3 bg-gray-50 rounded-xl border border-transparent focus:bg-white focus:border-teal-500 outline-none text-sm">
+                        </div>
+                        <div class="w-24">
+                            <input type="number" placeholder="0.00" min="0" step="0.01" required value="${item.price || ''}" 
+                                oninput="formHandler.updateItem(${index}, 'price', this.value)"
+                                class="w-full p-3 bg-gray-50 rounded-xl border border-transparent focus:bg-white focus:border-teal-500 outline-none text-sm text-right">
+                        </div>
+                        ${state.cartItems.length > 1 ? `
+                        <button type="button" onclick="formHandler.removeItem(${index})" class="p-3 text-red-400 hover:text-red-500 transition-colors">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>` : ''}
+                    `;
+                    container.appendChild(div);
+                });
+                formHandler.updateTotal();
+            },
+
+            updateTotal: () => {
+                const total = state.cartItems.reduce((sum, item) => sum + (item.price || 0), 0);
+                document.getElementById('create-total').innerText = `₹${total.toFixed(2)}`;
+            },
+
+            submit: async (e) => {
+                e.preventDefault();
+                const btn = document.getElementById('btn-save');
+                const originalText = btn.innerHTML;
+                
+                if (state.cartItems.some(i => !i.name)) {
+                    alert('Please fill in all item names');
+                    return;
+                }
+
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Saving...';
+                btn.classList.add('bg-gray-400');
+
+                const billData = {
+                    billId: `INV-${Date.now().toString().slice(-6)}`,
+                    date: document.getElementById('input-date').value,
+                    customerName: document.getElementById('input-name').value,
+                    phone: document.getElementById('input-phone').value,
+                    address: document.getElementById('input-address').value,
+                    items: state.cartItems,
+                    total: state.cartItems.reduce((sum, i) => sum + (i.price || 0), 0)
+                };
+
+                await api.saveBill(billData);
+                
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                btn.classList.remove('bg-gray-400');
+                router.navigate('dashboard');
+            }
+        };
+
+        // --- Detail Logic ---
+        const detailHandler = {
+            show: (bill) => {
+                state.currentBill = bill;
+                router.navigate('detail');
+
+                // Update New Header Elements
+                document.getElementById('detail-name').innerText = bill.customerName;
+                document.getElementById('detail-id').innerText = bill.billId;
+                document.getElementById('detail-date').innerText = new Date(bill.date).toLocaleDateString();
+                document.getElementById('detail-total').innerText = `₹${parseFloat(bill.total).toFixed(2)}`;
+                document.getElementById('detail-phone').innerText = bill.phone;
+                
+                const addressRow = document.getElementById('detail-address-row');
+                const addressEl = document.getElementById('detail-address');
+                if (bill.address) {
+                    addressEl.innerText = bill.address;
+                    addressRow.style.display = 'flex';
+                } else {
+                    addressRow.style.display = 'none';
+                }
+
+                const itemsContainer = document.getElementById('detail-items');
+                itemsContainer.innerHTML = '';
+                bill.items.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'py-4 flex justify-between items-center';
+                    div.innerHTML = `
+                        <span class="text-gray-700 font-medium text-sm">${item.name}</span>
+                        <span class="text-dark font-bold text-sm">₹${parseFloat(item.price).toFixed(2)}</span>
+                    `;
+                    itemsContainer.appendChild(div);
+                });
+            }
+        };
+
+        // --- Template Helper (Common for Print & PDF) ---
+        const templateRenderer = {
+            update: (bill) => {
+                document.getElementById('pdf-bill-id').innerText = `#${bill.billId}`;
+                document.getElementById('pdf-bill-date').innerText = new Date(bill.date).toLocaleDateString('en-GB');
+                document.getElementById('pdf-customer-name').innerText = bill.customerName;
+                document.getElementById('pdf-customer-phone').innerText = bill.phone;
+                document.getElementById('pdf-customer-address').innerText = bill.address || '';
+                document.getElementById('pdf-subtotal').innerText = `₹${parseFloat(bill.total).toFixed(2)}`;
+                document.getElementById('pdf-total').innerText = `₹${parseFloat(bill.total).toFixed(2)}`;
+
+                const tbody = document.getElementById('pdf-items-body');
+                tbody.innerHTML = '';
+                bill.items.forEach((item, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid #f1f5f9';
+                    tr.innerHTML = `
+                        <td style="padding: 12px 15px; color: #94a3b8; font-size: 13px;">${idx + 1}</td>
+                        <td style="padding: 12px 15px; color: #334155; font-weight: 500; font-size: 14px;">${item.name}</td>
+                        <td style="padding: 12px 15px; text-align: right; font-weight: bold; color: #0f172a; font-size: 14px; font-family: monospace;">${parseFloat(item.price).toFixed(2)}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        };
+
+        // --- PDF & Print Logic ---
+        const outputHandler = {
+            
+            // Function 1: Direct Print
+            print: () => {
+                const bill = state.currentBill;
+                if (!bill) return;
+
+                // 1. Update the hidden template with bill data
+                templateRenderer.update(bill);
+
+                // 2. Trigger browser print (CSS @media print handles visibility)
+                setTimeout(() => window.print(), 100);
+            },
+
+            // Function 2: Generate PDF
+            download: async () => {
+                const bill = state.currentBill;
+                if (!bill) return;
+
+                const btn = document.getElementById('btn-download-pdf');
+                const originalContent = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gen...';
+
+                try {
+                    // 1. Update Template
+                    templateRenderer.update(bill);
+
+                    // 2. Clone for Capture
+                    const template = document.getElementById('pdf-template');
+                    const clone = template.cloneNode(true);
+                    
+                    // Position clone off-screen but visible to canvas
+                    clone.style.position = 'fixed';
+                    clone.style.left = '-10000px';
+                    clone.style.top = '0';
+                    clone.style.display = 'block';
+                    document.body.appendChild(clone);
+
+                    // 3. Render Canvas
+                    const canvas = await html2canvas(clone, {
+                        scale: 2, 
+                        windowWidth: 1200,
+                        useCORS: true
+                    });
+
+                    document.body.removeChild(clone);
+
+                    // 4. Create PDF
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({
+                        orientation: 'portrait',
+                        unit: 'mm',
+                        format: 'a4'
+                    });
+
+                    const imgData = canvas.toDataURL('image/png');
+                    const imgWidth = 210;
+                    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+                    pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+
+                    // 5. Generate Filename: smeetprinters-(customername)-date.pdf
+                    const sanitizedName = (bill.customerName || 'customer').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                    const dateStr = new Date(bill.date).toISOString().split('T')[0];
+                    const filename = `smeetprinters-${sanitizedName}-${dateStr}.pdf`;
+
+                    pdf.save(filename);
+
+                } catch (error) {
+                    console.error(error);
+                    alert('PDF Generation failed');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = originalContent;
+                }
+            }
+        };
+    </script>
+</body>
+</html>
